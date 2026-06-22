@@ -18,11 +18,11 @@ import torch.nn as nn
 import torch.optim as optim
 
 def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=6, min_wrong=3, force_ge_half=False, eps=1e-8, selected_trials = None):
-
+    
     # features: (T, N) or (1,T,N) etc -> make (T, N)
     X = features.squeeze()
     if isinstance(X, torch.Tensor):
-        X_np = X.detach().cpu().numpy()
+        X_np = X.float().detach().cpu().numpy()
     else:
         X_np = np.asarray(X)
 
@@ -241,7 +241,7 @@ def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
         student_w = torch.ones(X_train.shape[1])
         student_b = -X_train.mean(0).sum()
 
-        out = (student_w @ X_train.T + student_b)
+        out = (torch.tensor(student_w).float() @ torch.tensor(X_train).float().T + student_b)
     else:
 
         n_neurons = X_train.shape[1]
@@ -250,7 +250,7 @@ def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
         student_w[neurons_circ_new] = 0.1
         student_w[neurons_rad_new] = -0.1
 
-        out = student_w @ X_train.T
+        out = torch.tensor(student_w).float() @ torch.tensor(X_train).float().T
         student_b = - out.mean()
         out += student_b
         
@@ -270,8 +270,8 @@ def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
     #plot_choice_imbalance(writer, p_inactivation, class_imbalance)
 
     crit = "BCE"
-    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(student_w, student_b, X_train, y_train, tunings, crit, len(student_w))
-    readout_weights = compute_readout_weights(student_w, student_b, X_train, y_train, tunings, crit, len(student_w))
+    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(torch.tensor(student_w).float(), student_b, X_train, y_train, tunings, crit, len(student_w))
+    readout_weights = compute_readout_weights(torch.tensor(student_w).float(), student_b, X_train, y_train, tunings, crit, len(student_w))
 
     #plot_cp_rw(writer, readout_weights, tunings)
 

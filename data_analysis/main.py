@@ -45,7 +45,7 @@ if choice == "only_session":
     tunings = tunings_session
 
 student_w, student_b, eta = train_oja_unsupervised(torch.tensor(X_train).float(), add_bias=centering, centering=centering)
-eigenvector = np.sign(Vh[0,:].mean())*Vh[0,:]
+eigenvector = np.sign(Vh[1,:].mean())*Vh[1,:]
 #student_w = np.sign(student_w.mean())*torch.tensor(eigenvector)
 #student_b = -student_b if student_w.mean()<0 else student_b
 #student_w = -student_w if student_w.mean()<0 else student_w
@@ -56,11 +56,12 @@ plot_weights(writer, student_w, student_b, Vh, tunings)
 ind0 = np.where(y_train == 0)[0]  
 ind1 = np.where(y_train == 1)[0]
 
-y_exp = torch.matmul(torch.tensor(X_train).float(), torch.tensor(student_w).squeeze().float()) + student_b
+features = torch.tensor(X_train).float() #- X_train.mean(0)
+y_exp = torch.matmul(torch.tensor(features).float(), torch.tensor(student_w).squeeze().float()) + student_b
 y_exp = y_exp.detach().numpy()
 accuracy_train_heuristic1 =  float( (y_exp[ind0] <= 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
 
-y_exp = torch.matmul(torch.tensor(X_train).float(), torch.tensor(-student_w).squeeze().float()) - student_b
+y_exp = torch.matmul(torch.tensor(features).float(), torch.tensor(-student_w).squeeze().float()) - student_b
 y_exp = y_exp.detach().numpy()
 accuracy_train_heuristic2 =  float( (y_exp[ind0] <= 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
 
@@ -74,7 +75,7 @@ else:
 print("accuracy is: ", accuracy_train_heuristic)
 
 ### compute RW/CP on testing data
-features = X_test #X_train #- X_train.mean(0) 
+features = torch.tensor(X_test).float() #- X_train.mean(0) 
 y = y_test
 a_choice = animal_choice_test
 
@@ -116,7 +117,7 @@ plot_choice_imbalance(writer, p_inactivation, class_imbalance)
 print("OTHER weights... (for sum and diff models)")
 
 ### compute RW/CP on training data
-features = X_train #- X_train.mean(0) 
+features = torch.tensor(X_train).float() #- X_train.mean(0) 
 y = y_train
 a_choice = animal_choice_train
 
@@ -134,16 +135,18 @@ for p in p_inactivation:
     acc, under_rep_imbalance = find_bias_simple(p, torch.tensor(student_w).T.float(), student_b, torch.tensor(features).float(), y)
     class_imbalance_train.append(under_rep_imbalance)
 
-cp_real_total, CP_arr_real, neurons_tuned_list, new_tunings = compute_cp(torch.tensor(student_w).float(), torch.tensor(student_b), torch.tensor(X_total).float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
-readout_weights_real_total = compute_readout_weights(torch.tensor(student_w).float(), torch.tensor(student_b), torch.tensor(X_total).float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
+features = torch.tensor(X_total).float() #- X_total.mean(0)
+cp_real_total, CP_arr_real, neurons_tuned_list, new_tunings = compute_cp(torch.tensor(student_w).float(), torch.tensor(student_b), features.float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
+readout_weights_real_total = compute_readout_weights(torch.tensor(student_w).float(), torch.tensor(student_b), features.float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
 
 ### compute RW/CP for sum and diff models
-out_sum, ind0_sum, ind1_sum, p_inactivation, class_imbalance_sum, readout_weights_sum = compute_other_cp_inactivation(writer, X_train, y_train, tunings, model="SUM")
+features = torch.tensor(X_train).float() #- X_train.mean(0)
+out_sum, ind0_sum, ind1_sum, p_inactivation, class_imbalance_sum, readout_weights_sum = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="SUM")
 plot_results(writer, out_sum, ind0_sum, ind1_sum)
 plot_choice_imbalance(writer, p_inactivation, class_imbalance_sum)
 plot_cp_rw(writer, readout_weights_sum, tunings)
 
-out_diff, ind0_diff, ind1_diff, p_inactivation, class_imbalance_diff, readout_weights_diff = compute_other_cp_inactivation(writer, X_train, y_train, tunings, model="DIFF")
+out_diff, ind0_diff, ind1_diff, p_inactivation, class_imbalance_diff, readout_weights_diff = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="DIFF")
 plot_results(writer, out_diff, ind0_diff, ind1_diff)
 plot_choice_imbalance(writer, p_inactivation, class_imbalance_diff)
 plot_cp_rw(writer, readout_weights_diff, tunings)

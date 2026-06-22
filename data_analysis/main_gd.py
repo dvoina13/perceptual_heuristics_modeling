@@ -36,13 +36,16 @@ torch.backends.cudnn.benchmark = False
 torch.use_deterministic_algorithms(True)
 
 device = 'cpu'
-n_sessions, data_dictionary, df_all_sessions, tunings, tunings_session, X_train, y_train, animal_choice_train, X_test, y_test, animal_choice_test =run(directory, snr_choice = snr_choice, choice=choice, get_data="generate")
+n_sessions, data_dictionary, df_all_sessions, tunings, tunings_session, X_train, y_train, animal_choice_train, X_test, y_test, animal_choice_test, X_total, y_total, animal_choice_total, selected_trials = run(directory, snr_choice = snr_choice, choice=choice, session=session, get_data="generate")
 
 Vh = compute_svd(X_train)
 
 y_train = 2*y_train - 1
 y_test = 2*y_test - 1
 
+if choice == "only_session":
+    tunings = tunings_session
+    
 def train_linear_model(
     X,
     y,
@@ -100,7 +103,7 @@ def train_linear_model(
 #X_train = X_train.detach().numpy()
 #y_train = y_train.detach().numpy()
 
-w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-4, n_epochs=10000, loss_type="mse",  # "mse" or "bce"
+w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-3, n_epochs=10000, loss_type="mse",  # "mse" or "bce"
     verbose=True)
 
 w_gd = torch.tensor(w_gd); b_gd = torch.tensor(b_gd); 
@@ -110,8 +113,8 @@ y = 2*(y.squeeze()>0.0).numpy().astype(float) - 1 #(y.squeeze()>0.0).numpy().ast
 ind0 = np.where(y_train == -1)[0] #np.where(y_train == 0)[0]
 ind1 = np.where(y_train == 1)[0]
 
-print("loss: ", np.abs(torch.tensor(y).squeeze()-y_train.squeeze()).sum()/len(y_train))
-print("acc: ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / len(y))
+print("loss (training): ", np.abs(torch.tensor(y).squeeze()-y_train.squeeze()).sum()/len(y_train))
+print("acc (training): ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / len(y))
 
 y = torch.tensor(X_test).float() @ w_gd + b_gd
 y = 2*(y.squeeze()>0.0).numpy().astype(float) - 1 #(y.squeeze()>0.0).numpy().astype(float)
@@ -119,8 +122,8 @@ y = 2*(y.squeeze()>0.0).numpy().astype(float) - 1 #(y.squeeze()>0.0).numpy().ast
 ind0 = np.where(y_test == -1)[0] #np.where(y_train == 0)[0]
 ind1 = np.where(y_test == 1)[0]
 
-print("loss: ", np.abs(torch.tensor(y).squeeze()-y_test.squeeze()).sum()/len(y_test))
-print("acc: ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / len(y))
+print("loss (testing): ", np.abs(torch.tensor(y).squeeze()-y_test.squeeze()).sum()/len(y_test))
+print("acc (testing): ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / len(y))
 
 neurons_circ_new, neurons_rad_new, neurons_untuned_new = tunings
 neurons_circ_new = list(neurons_circ_new); neurons_rad_new = list(neurons_rad_new); neurons_untuned_new = list(neurons_untuned_new);
@@ -158,8 +161,8 @@ n_neurons = X_train.shape[1]
 #tunings = [np.array(neuron_id_tuned_circular)-1, np.array(neuron_id_tuned_radial)-1, np.array(neuron_id_tuned_untuned)-1]
 tunings = [np.array(neurons_circ_new), np.array(neurons_rad_new), np.array(neurons_untuned_new)]
 
-cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(w_gd.T, b_gd, X_test, y_test, tunings, crit, n_neurons)
-readout_weights = compute_readout_weights(w_gd.T, b_gd, X_test, y_test, tunings, crit, n_neurons)
+cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
+readout_weights = compute_readout_weights(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
 
 fig = plt.figure()
 plt.bar(["stim 1 (over-represented)", "stim 2 (under-represented)"], [np.nanmean(readout_weights[:len(tunings[0])]), np.nanmean(readout_weights[len(tunings[0]):])])
@@ -169,7 +172,7 @@ class_imbalance = []
 p_inactivation = [.00001, 0.1, 0.3, 0.5, 0.75, 0.9]
 crit = "MSE"
 for p in p_inactivation:
-    acc, ci = find_bias_simple(p, torch.tensor(w_gd).float(), torch.tensor(b_gd).float(), torch.tensor(X_test).float(), torch.tensor(y_test).float(), crit, comparison="gd")
+    acc, ci = find_bias_simple(p, torch.tensor(w_gd).float(), torch.tensor(b_gd).float(), torch.tensor(X_total).float(), torch.tensor(y_total).float(), crit, comparison="gd")
     class_imbalance.append(ci)
 
 fig = plt.figure()
@@ -178,7 +181,7 @@ plt.xlabel("probability of inactivation")
 plt.ylabel("class imbalance (under-represented)")
 writer.add_figure("plots/class_imbalance_GD", fig, global_step=0)
 
-file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + ["_centering" if centering else ""][0]
+file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + "_session" + str(session) + ["_centering" if centering else ""][0]
 
 np.save('results/' + file + "_cp.npy", np.array(cp))
 np.save('results/' + file + "_readout_weights.npy", np.array(readout_weights))

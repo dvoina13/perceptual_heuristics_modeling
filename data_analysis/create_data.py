@@ -307,7 +307,7 @@ def create_X_and_y(df_all_sessions, snr_choice, choice, session=1, get_data="sav
             snr_choice = [snr_choice]
             
         sess = session
-    
+
         list_of_neurons_s = df_all_sessions[(df_all_sessions.stim == 'circ') & (df_all_sessions.snr.isin(snr_choice)) & (df_all_sessions.session == sess)].neuron_id.unique()
         n_trials_s_circ = len(df_all_sessions[(df_all_sessions.stim == 'circ') & (df_all_sessions.snr.isin(snr_choice)) & (df_all_sessions.session == sess)].trial.unique()) 
         n_trials_s_rad = len(df_all_sessions[(df_all_sessions.stim == 'rad') & (df_all_sessions.snr.isin(snr_choice)) & (df_all_sessions.session == sess)].trial.unique()) 
@@ -331,9 +331,16 @@ def create_X_and_y(df_all_sessions, snr_choice, choice, session=1, get_data="sav
         
             print("stimulus", stimulus)
             trials = df_all_sessions[(df_all_sessions.stim == stimulus) & (df_all_sessions.snr.isin(snr_choice))  & (df_all_sessions.session == sess) & (df_all_sessions.neuron_id == list_of_neurons_s[0])].trial.unique()
-            print("len(trials)", len(trials))
+
+            min_trials = np.inf
+            for nn in range(n_neurons_s):
+                trials_ = df_all_sessions[(df_all_sessions.stim == stimulus) & (df_all_sessions.snr.isin(snr_choice))  & (df_all_sessions.session == sess) & (df_all_sessions.neuron_id == list_of_neurons_s[nn])].trial.unique()
+                if len(trials_) <= min_trials:
+                    min_trials = len(trials_)
+            print("len(trials)", min_trials)
             
-            for t in range(len(trials)):
+            
+            for t in range(min_trials):
                 selected_trial =  trial
                 for neuron_ind, neuron in enumerate(np.sort(np.array(list_of_neurons_s))):
     
