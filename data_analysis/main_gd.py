@@ -103,7 +103,7 @@ def train_linear_model(
 #X_train = X_train.detach().numpy()
 #y_train = y_train.detach().numpy()
 
-w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-3, n_epochs=10000, loss_type="mse",  # "mse" or "bce"
+w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-4, n_epochs=10000, loss_type="mse",  # "mse" or "bce"
     verbose=True)
 
 w_gd = torch.tensor(w_gd); b_gd = torch.tensor(b_gd); 
@@ -183,10 +183,13 @@ writer.add_figure("plots/class_imbalance_GD", fig, global_step=0)
 
 file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + "_session" + str(session) + ["_centering" if centering else ""][0]
 
-np.save('results/' + file + "_cp.npy", np.array(cp))
-np.save('results/' + file + "_readout_weights.npy", np.array(readout_weights))
-np.save('results/' + file + "_class_imbalance.npy", np.array(class_imbalance))
+date_str = datetime.now().strftime("%Y-%m-%d")
+Path("/home/dvoina/myproj1/data_analysis/results/" + date_str).mkdir(parents=True, exist_ok=True)
 
-np.save('results/' + file + 'w_gd.npy', np.array(w_gd))
-np.save('results/' + file + 'b_gd.npy', np.array(b_gd))
+np.save('results/' + date_str + file + "_cp.npy", np.array(cp))
+np.save('results/' + date_str + file + "_readout_weights.npy", np.array(readout_weights))
+np.save('results/' + date_str + file + "_class_imbalance.npy", np.array(class_imbalance))
+
+np.save('results/' + date_str + file + 'w_gd.npy', np.array(w_gd))
+np.save('results/' + date_str + file + 'b_gd.npy', np.array(b_gd))
 

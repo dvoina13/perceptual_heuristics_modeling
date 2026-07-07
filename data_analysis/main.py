@@ -19,7 +19,7 @@ import torch.optim as optim
 
 from create_data import run
 from train_Oja import compute_svd, train_oja_unsupervised
-from utils import compute_cp, compute_readout_weights, find_bias_simple, compute_other_cp_inactivation, save_all
+from utils import compute_cp, compute_readout_weights, find_bias_simple, compute_other_cp_inactivation, compute_lr_cp_inactivation, save_all
 from plot import plot_weights, plot_cp_rw, plot_choice_imbalance, plot_results
 
 from torch.utils.tensorboard import SummaryWriter
@@ -27,6 +27,7 @@ from torch.utils.tensorboard import SummaryWriter
 import parameters
 from parameters import *
 
+print("SEED", seed)
 torch.manual_seed(seed)
 random.seed(seed)
 np.random.seed(seed)
@@ -56,7 +57,7 @@ plot_weights(writer, student_w, student_b, Vh, tunings)
 ind0 = np.where(y_train == 0)[0]  
 ind1 = np.where(y_train == 1)[0]
 
-features = torch.tensor(X_train).float() #- X_train.mean(0)
+features = torch.tensor(X_train).float() - X_train.mean(0) if centering else torch.tensor(X_train)
 y_exp = torch.matmul(torch.tensor(features).float(), torch.tensor(student_w).squeeze().float()) + student_b
 y_exp = y_exp.detach().numpy()
 accuracy_train_heuristic1 =  float( (y_exp[ind0] <= 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
@@ -65,6 +66,8 @@ y_exp = torch.matmul(torch.tensor(features).float(), torch.tensor(-student_w).sq
 y_exp = y_exp.detach().numpy()
 accuracy_train_heuristic2 =  float( (y_exp[ind0] <= 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
 
+print("accuracy_train_heuristic1, accuracy_train_heuristic2", accuracy_train_heuristic1, accuracy_train_heuristic2, accuracy_train_heuristic1 + accuracy_train_heuristic2)
+
 if accuracy_train_heuristic1 < accuracy_train_heuristic2:
     student_w = -student_w
     student_b = -student_b
@@ -72,10 +75,10 @@ if accuracy_train_heuristic1 < accuracy_train_heuristic2:
 else:
     accuracy_train_heuristic = accuracy_train_heuristic1
 
-print("accuracy is: ", accuracy_train_heuristic)
+print("accuracy (training) is: ", accuracy_train_heuristic)
 
 ### compute RW/CP on testing data
-features = torch.tensor(X_test).float() #- X_train.mean(0) 
+features = torch.tensor(X_test).float() - X_train.mean(0) if centering else torch.tensor(X_test).float()
 y = y_test
 a_choice = animal_choice_test
 
@@ -84,7 +87,9 @@ y_exp = y_exp.detach().numpy()
 ind0 = np.where(y == 0)[0]  
 ind1 = np.where(y == 1)[0]
 
-accuracy_heuristic =  float( (y_exp[ind0] <= 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
+accuracy_heuristic =  float( (y_exp[ind0] < 0).sum() + (y_exp[ind1] >= 0).sum() ) / len(y_exp)
+print("(test) accuracy is: ", accuracy_heuristic)
+accuracy_heuristic =  float( (y_exp[ind0] >= 0).sum() + (y_exp[ind1] < 0).sum() ) / len(y_exp)
 print("(test) accuracy is: ", accuracy_heuristic)
 
 crit = "BCE"
@@ -117,7 +122,7 @@ plot_choice_imbalance(writer, p_inactivation, class_imbalance)
 print("OTHER weights... (for sum and diff models)")
 
 ### compute RW/CP on training data
-features = torch.tensor(X_train).float() #- X_train.mean(0) 
+features = torch.tensor(X_train).float() - X_train.mean(0) if centering else torch.tensor(X_train).float()
 y = y_train
 a_choice = animal_choice_train
 
@@ -135,22 +140,23 @@ for p in p_inactivation:
     acc, under_rep_imbalance = find_bias_simple(p, torch.tensor(student_w).T.float(), student_b, torch.tensor(features).float(), y)
     class_imbalance_train.append(under_rep_imbalance)
 
-features = torch.tensor(X_total).float() #- X_total.mean(0)
+features = torch.tensor(X_total).float() - X_total.mean(0) if centering else torch.tensor(X_total).float()
 cp_real_total, CP_arr_real, neurons_tuned_list, new_tunings = compute_cp(torch.tensor(student_w).float(), torch.tensor(student_b), features.float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
 readout_weights_real_total = compute_readout_weights(torch.tensor(student_w).float(), torch.tensor(student_b), features.float(), y_total, tunings, crit, n_neurons, choose_y = "real", animal_choice=animal_choice_total)
 
 ### compute RW/CP for sum and diff models
-features = torch.tensor(X_train).float() #- X_train.mean(0)
-out_sum, ind0_sum, ind1_sum, p_inactivation, class_imbalance_sum, readout_weights_sum = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="SUM")
+features = torch.tensor(X_train).float() - X_train.mean(0) if centering else torch.tensor(X_train).float()
+out_sum, ind0_sum, ind1_sum, p_inactivation, class_imbalance_sum, readout_weights_sum, cp_sum = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="SUM")
 plot_results(writer, out_sum, ind0_sum, ind1_sum)
 plot_choice_imbalance(writer, p_inactivation, class_imbalance_sum)
 plot_cp_rw(writer, readout_weights_sum, tunings)
 
-out_diff, ind0_diff, ind1_diff, p_inactivation, class_imbalance_diff, readout_weights_diff = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="DIFF")
+out_diff, ind0_diff, ind1_diff, p_inactivation, class_imbalance_diff, readout_weights_diff, cp_diff = compute_other_cp_inactivation(writer, features.float(), y_train, tunings, model="DIFF")
 plot_results(writer, out_diff, ind0_diff, ind1_diff)
 plot_choice_imbalance(writer, p_inactivation, class_imbalance_diff)
 plot_cp_rw(writer, readout_weights_diff, tunings)
 
+out_lr, ind0, ind1, p_inactivation, class_imbalance_lr, readout_weights_lr, cp_lr = compute_lr_cp_inactivation(writer, X_train, y_train, tunings)
 #save stuff
 file = directory[:-1] + "_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + ["_centering" if centering else ""][0]
-save_all(file, session, Vh[0,:], student_w, tunings, accuracy_train_heuristic, accuracy_heuristic, cp, cp_real, readout_weights, readout_weights_real, class_imbalance, cp_train, cp_real_train, readout_weights_train, readout_weights_real_train, class_imbalance_train,  readout_weights_real_total, cp_real_total, readout_weights_sum, class_imbalance_sum, readout_weights_diff, class_imbalance_diff)
+save_all(file, session, Vh[0,:], student_w, tunings, accuracy_train_heuristic, accuracy_heuristic, cp, cp_real, readout_weights, readout_weights_real, class_imbalance, cp_train, cp_real_train, readout_weights_train, readout_weights_real_train, class_imbalance_train,  readout_weights_real_total, cp_real_total, readout_weights_sum, cp_sum, class_imbalance_sum, readout_weights_diff, cp_diff, class_imbalance_diff,  class_imbalance_lr, readout_weights_lr, cp_lr)

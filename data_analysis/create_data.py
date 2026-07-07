@@ -374,12 +374,12 @@ def create_X_and_y(df_all_sessions, snr_choice, choice, session=1, get_data="sav
     animal_choice_total = animal_choice.copy()
     
     n = X_train.shape[0]
-    X_test = X_train[int(0.8*n):,:]
-    y_test = y_train[int(0.8*n):]
-    X_train = X_train[:int(0.8*n),:]
-    y_train = y_train[:int(0.8*n)]
-    animal_choice_train = animal_choice[:int(0.8*n)]
-    animal_choice_test = animal_choice[int(0.8*n):]
+    X_test = X_train[int(0.7*n):,:]
+    y_test = y_train[int(0.7*n):]
+    X_train = X_train[:int(0.7*n),:]
+    y_train = y_train[:int(0.7*n)]
+    animal_choice_train = animal_choice[:int(0.7*n)]
+    animal_choice_test = animal_choice[int(0.7*n):]
     
     return X_train, y_train, animal_choice_train, X_test, y_test, animal_choice_test, X_total, y_total, animal_choice_total, list_of_neurons, selected_trials
 

@@ -12,13 +12,19 @@ from sklearn.linear_model import LinearRegression
 from scipy.stats import norm
 from sklearn import svm
 from scipy.linalg import solve
+from sklearn.tree import DecisionTreeClassifier
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from datetime import datetime
+from pathlib import Path
+
 def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=6, min_wrong=3, force_ge_half=False, eps=1e-8, selected_trials = None):
-    
+#min_per_choice=6, min_wrong=3
+
+    print("min_per_choice, min_wrong", min_per_choice, min_wrong)
     # features: (T, N) or (1,T,N) etc -> make (T, N)
     X = features.squeeze()
     if isinstance(X, torch.Tensor):
@@ -88,6 +94,7 @@ def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choo
             n0 = int((1 - o).sum())
             print("choice is preferred, or unpreferred", n0, n1)
             wrong = np.sum(choice[idx] != y[idx])
+            print("wrong", wrong)
             #wrong = min(n0, n1)  # proxy if you don't have correctness labels
 
             if n1 < min_per_choice or n0 < min_per_choice or wrong < min_wrong:
@@ -189,7 +196,6 @@ def find_bias_simple(p, student_w, student_b, features, y, crit="BCE", compariso
             ind0 = np.where(y == 0)[0] 
             ind1 = np.where(y == 1)[0]
         else:
-            print('hello')
             ind0 = np.where(y == -1)[0] 
             ind1 = np.where(y == 1)[0] 
 
@@ -199,6 +205,17 @@ def find_bias_simple(p, student_w, student_b, features, y, crit="BCE", compariso
 
         y_res = logits.detach().numpy() - student_b.item()
 
+        print("criteria is: ", crit)
+        if crit == "BCE":
+            threshold = 0.0
+            acc = ( (y[logits < threshold] == 0).sum() + (y[logits > threshold] == 1).sum() )/len(y)
+        elif crit == "MSE":
+            threshold = 0.0
+            acc = ( (y[logits < threshold] == -1).sum() + (y[logits > threshold] == 1).sum() )/len(y)
+
+        return acc, (logits<threshold).sum()/features.shape[0]
+    
+        """
         print("criteria is: ", crit)
         if crit == "BCE":
             threshold = 0.0
@@ -219,20 +236,20 @@ def find_bias_simple(p, student_w, student_b, features, y, crit="BCE", compariso
         print("acc1, acc2", acc1, acc2)
         if acc1 == acc2:
             print("given p=", str(p) + ", then accuracy is: ", acc2)
-            return acc2, (logits>threshold).sum()
+            return acc2, (logits>threshold).sum()/features.shape[0]
             
         if acc1_nonsparse < acc2_nonsparse: #student_w.mean()< 0: #
             print("given p=", str(p) + ", then accuracy is: ", acc2, "class 1 labels (under-represented)", (logits>=threshold).sum(), "class 2 labels (over-represented)", (logits<threshold).sum())
             print("means of classes: ", logits[ind0].mean(), logits[ind1].mean())
             print("std of classes: ", logits[ind0].std(), logits[ind1].std())
-            return acc2, (logits>=threshold).sum()
+            return acc2, (logits>=threshold).sum()/features.shape[0]
         else:
             print("given p=", str(p) + ", then accuracy is: ", acc1, "class 1 labels (under-represented)", (logits<=threshold).sum(), "class 2 labels (over-represented)", (logits>threshold).sum())
             print("means of classes: ", logits[ind0].mean(), logits[ind1].mean())
             print("std of classes: ", logits[ind0].std(), logits[ind1].std())
-            return acc1, (logits<=threshold).sum()
+            return acc1, (logits<=threshold).sum()/features.shape[0]
 
-
+        """
 def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
 
     neurons_circ_new, neurons_rad_new, neurons_untuned_new = tunings
@@ -251,7 +268,11 @@ def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
         student_w[neurons_rad_new] = -0.1
 
         out = torch.tensor(student_w).float() @ torch.tensor(X_train).float().T
-        student_b = - out.mean()
+        #student_b = - out.mean()
+        clf = DecisionTreeClassifier(max_depth=1)
+        clf.fit(out.reshape(-1, 1), y_train)
+        student_b = -clf.tree_.threshold[0]
+        
         out += student_b
         
     ind0 = np.where(y_train == 0)[0]
@@ -275,36 +296,72 @@ def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
 
     #plot_cp_rw(writer, readout_weights, tunings)
 
-    return out, ind0, ind1, p_inactivation, class_imbalance, readout_weights
+    return out, ind0, ind1, p_inactivation, np.array(class_imbalance)/X_train.shape[0], readout_weights, cp
 
-def save_all(file, session, eigenvector, student_w, tunings, accuracy_train_theuristic, accuracy_heuristic, cp, cp_real, readout_weights, readout_weights_real, class_imbalance, cp_train, cp_real_train, readout_weights_train, readout_weights_real_train, class_imbalance_train, readout_weights_real_total, cp_real_total, readout_weights_sum, class_imbalance_sum, readout_weights_diff, class_imbalance_diff):
+def compute_lr_cp_inactivation(writer, X_train, y_train, tunings):
 
-    np.save("results/" + file + "session_" + str(session) + "_eigenvector_vh.npy", eigenvector)
-    np.save("results/" + file + "session_" + str(session) + "_weight.npy", eigenvector)
-    np.save("results/" + file + "session_" + str(session) + "_acc.npy", accuracy_heuristic)
-    np.save("results/" + file + "session_" + str(session) + "_acc_training.npy", accuracy_train_theuristic)
+    model = LinearRegression().fit(X_train, y_train)
+    weights_lr = model.coef_
+    bias_lr = model.intercept_
     
-    np.save("results/" + file  + "session_" + str(session) + "_cp.npy", cp)
-    np.save("results/" + file  + "session_" + str(session)+ "_cp_real.npy", cp_real)
+    out = X_train @ weights_lr + bias_lr
 
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights.npy", readout_weights)
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_real.npy", readout_weights_real)
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_sum.npy", readout_weights_sum)
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_diff.npy", readout_weights_diff)
+    ind0 = np.where(y_train == 0)[0]
+    ind1 = np.where(y_train == 1)[0]
+    acc = (((out[ind0]-0.5) < 0).sum() +  (out[ind1]-0.5 > 0).sum())/len(out)
+    print("acc from linear regression models is: ", acc)
 
-    np.save("results/" + file  + "session_" + str(session) + "_class_imbalance.npy", class_imbalance)
-    np.save("results/" + file  + "session_" + str(session) + "_class_imbalance_sum.npy", class_imbalance_sum)
-    np.save("results/" + file  + "session_" + str(session) + "_class_imbalance_diff.npy", class_imbalance_diff)
-
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_train.npy", readout_weights_train)
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_real_train.npy", readout_weights_real_train)
-    np.save("results/" + file  + "session_" + str(session) + "_cp_train.npy", cp_train)
-    np.save("results/" + file  + "session_" + str(session) + "_cp_real_train.npy", cp_real_train)
-    np.save("results/" + file  + "session_" + str(session) + "_class_imbalance_train.npy", class_imbalance_train)
-
-    np.save("results/" + file  + "session_" + str(session) + "_readout_weights_real_total.npy", readout_weights_real_total)
-    np.save("results/" + file  + "session_" + str(session) + "_cp_real_total.npy", cp_real_total)
+    class_imbalance = []
+    p_inactivation = [0.0001, 0.3, 0.5, 0.75, 0.9]
+    for p in p_inactivation:
+        acc, under_rep_imbalance = find_bias_simple(p, torch.tensor(weights_lr).T, torch.tensor(bias_lr)-0.5, torch.tensor(X_train).float(), y_train)
+        class_imbalance.append(under_rep_imbalance)
     
-    np.save("results/" + file  + "session_" + str(session) + "_neurons_tuned_circ.npy", np.array(tunings[0]))
-    np.save("results/" + file  + "session_" + str(session) + "_neurons_tuned_rad.npy", np.array(tunings[1]))
-    np.save("results/" + file  + "session_" + str(session) + "_neurons_untuned.npy", np.array(tunings[2]))
+    crit = "BCE"
+    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(torch.tensor(weights_lr).float(), bias_lr-0.5, X_train, y_train, tunings, crit, len(weights_lr))
+    readout_weights = compute_readout_weights(torch.tensor(weights_lr).float(), bias_lr-0.5, X_train, y_train, tunings, crit, len(weights_lr))
+
+    return out, ind0, ind1, p_inactivation, np.array(class_imbalance)/X_train.shape[0], readout_weights, cp
+
+def save_all(file, session, eigenvector, student_w, tunings, accuracy_train_theuristic, accuracy_heuristic, cp, cp_real, readout_weights, readout_weights_real, class_imbalance, cp_train, cp_real_train, readout_weights_train, readout_weights_real_train, class_imbalance_train, readout_weights_real_total, cp_real_total, readout_weights_sum, cp_sum, class_imbalance_sum, readout_weights_diff, cp_diff, class_imbalance_diff,  class_imbalance_lr, readout_weights_lr, cp_lr):
+
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    Path("/home/dvoina/myproj1/data_analysis/results/" + date_str).mkdir(parents=True, exist_ok=True)
+
+    print("save everything in the following dir: ", date_str)
+    
+    np.save("results/" + date_str + "/" + file + "session_" + str(session) + "_eigenvector_vh.npy", eigenvector)
+    np.save("results/" + date_str + "/" + file + "session_" + str(session) + "_weight.npy", eigenvector)
+    np.save("results/" + date_str + "/" + file + "session_" + str(session) + "_acc.npy", accuracy_heuristic)
+    np.save("results/" + date_str + "/" + file + "session_" + str(session) + "_acc_training.npy", accuracy_train_theuristic)
+    
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp.npy", cp)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session)+ "_cp_real.npy", cp_real)
+
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights.npy", readout_weights)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_real.npy", readout_weights_real)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_sum.npy", cp_sum)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_diff.npy", cp_diff)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_lr.npy", cp_lr)    
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_sum.npy", readout_weights_sum)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_diff.npy", readout_weights_diff)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_lr.npy", readout_weights_lr)
+
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_class_imbalance.npy", class_imbalance)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_class_imbalance_sum.npy", class_imbalance_sum)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_class_imbalance_diff.npy", class_imbalance_diff)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_class_imbalance_diff.npy", class_imbalance_lr)
+
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_train.npy", readout_weights_train)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_real_train.npy", readout_weights_real_train)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_train.npy", cp_train)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_real_train.npy", cp_real_train)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_class_imbalance_train.npy", class_imbalance_train)
+
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_readout_weights_real_total.npy", readout_weights_real_total)
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_cp_real_total.npy", cp_real_total)
+    
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_neurons_tuned_circ.npy", np.array(tunings[0]))
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_neurons_tuned_rad.npy", np.array(tunings[1]))
+    np.save("results/" + date_str + "/" + file  + "session_" + str(session) + "_neurons_untuned.npy", np.array(tunings[2]))
