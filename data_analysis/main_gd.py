@@ -22,6 +22,9 @@ from train_Oja import compute_svd, train_oja_unsupervised
 from utils import compute_cp, compute_readout_weights, find_bias_simple, compute_other_cp_inactivation, save_all
 from plot import plot_weights, plot_cp_rw, plot_choice_imbalance, plot_results
 
+from datetime import datetime
+from pathlib import Path
+
 from torch.utils.tensorboard import SummaryWriter
 
 import parameters
@@ -186,10 +189,12 @@ file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choic
 date_str = datetime.now().strftime("%Y-%m-%d")
 Path("/home/dvoina/myproj1/data_analysis/results/" + date_str).mkdir(parents=True, exist_ok=True)
 
-np.save('results/' + date_str + file + "_cp.npy", np.array(cp))
-np.save('results/' + date_str + file + "_readout_weights.npy", np.array(readout_weights))
-np.save('results/' + date_str + file + "_class_imbalance.npy", np.array(class_imbalance))
 
-np.save('results/' + date_str + file + 'w_gd.npy', np.array(w_gd))
-np.save('results/' + date_str + file + 'b_gd.npy', np.array(b_gd))
+print('results/' + date_str + "/" + file + "_cp.npy")
+np.save('results/' + date_str + "/"  + file + "_cp.npy", np.array(cp))
+np.save('results/' + date_str + "/"  + file + "_readout_weights.npy", np.array(readout_weights))
+np.save('results/' + date_str + "/"  + file + "_class_imbalance.npy", np.array(class_imbalance))
+
+np.save('results/' + date_str + "/"  + file + 'w_gd.npy', np.array(w_gd))
+np.save('results/' + date_str + "/"  + file + 'b_gd.npy', np.array(b_gd))
 
