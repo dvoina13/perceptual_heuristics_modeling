@@ -7,11 +7,11 @@ parser.add_argument("--snr_choice", type=list, default = [0.65, 0.8, 1.0], help=
 #parser.add_argument("--snr_choice", type=list, default = [0.05, 0.2, 0.35, 0.5], help="snr_choice")
 
 parser.add_argument("-choice", type=str, default = "only_session", help="choice")
-parser.add_argument("-data", type=str, default = "M1_Phase2_Lf_gratings/", help="data directory you want to analyze")
-parser.add_argument("-centering", type=bool, default = True, help="to center, or not to center, that is the question...")
-parser.add_argument("-session", type=int, default = 4, help="to center, or not to center, that is the question...")
+parser.add_argument("-data", type=str, default = "M1_Phase3_Lf_gratings/", help="data directory you want to analyze")
+parser.add_argument("-centering", type=bool, default = False, help="to center, or not to center, that is the question...")
+parser.add_argument("-session", type=int, default = 3, help="to center, or not to center, that is the question...")
 
-parser.add_argument("-lC", type=bool, default = True, help="low constraints on cp")
+parser.add_argument("-lC", type=bool, default = False, help="low constraints on cp")
 
 args = parser.parse_args()
 

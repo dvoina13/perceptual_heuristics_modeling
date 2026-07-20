@@ -21,7 +21,7 @@ import torch.optim as optim
 from datetime import datetime
 from pathlib import Path
 
-def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=3, min_wrong=4, force_ge_half=False, eps=1e-8, selected_trials = None):
+def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=3, min_wrong=6, force_ge_half=False, eps=1e-8, selected_trials = None):
 #min_per_choice=6, min_wrong=3
 
     print("min_per_choice, min_wrong", min_per_choice, min_wrong)
