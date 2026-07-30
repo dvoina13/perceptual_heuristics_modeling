@@ -21,7 +21,7 @@ import torch.optim as optim
 from datetime import datetime
 from pathlib import Path
 
-def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=3, min_wrong=6, force_ge_half=False, eps=1e-8, selected_trials = None):
+def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=6, min_wrong=3, force_ge_half=False, eps=1e-8, selected_trials = None):
 #min_per_choice=6, min_wrong=3
 
     print("min_per_choice, min_wrong", min_per_choice, min_wrong)
@@ -37,6 +37,8 @@ def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choo
 
     # logits + choice
     out = (student_w @ X.T + student_b)
+    print("out", out)
+    print("crit", crit)
     
     if isinstance(out, torch.Tensor):
         out = out.detach().cpu().numpy()
@@ -47,11 +49,10 @@ def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choo
 
     if crit != "BCE":
         choice = 2*choice - 1
-
+    print("choice", choice)
+    
     if choose_y != "model":
         choice = animal_choice
-
-    print("choice", choice)
         
     neurons_tuned_stim1, neurons_tuned_stim0, neurons_untuned = tunings
     neurons_tuned_list = list(neurons_tuned_stim1) + list(neurons_tuned_stim0)
@@ -69,7 +70,8 @@ def compute_cp(student_w, student_b, features, y, tunings, crit, n_neurons, choo
     
     for i, n in enumerate(neurons_tuned_list):
 
-        pref = (0 if crit == "BCE" else -1) if n in neurons_tuned_stim0 else (1)            
+        pref = (0 if crit == "BCE" else -1) if n in neurons_tuned_stim0 else (1)    
+        print("pref", pref)
         new_tunings.append(pref)
 
         for s in list_of_stim:
@@ -250,6 +252,171 @@ def find_bias_simple(p, student_w, student_b, features, y, crit="BCE", compariso
             return acc1, (logits<=threshold).sum()/features.shape[0]
 
         """
+
+def compute_cp_nonlinear_model(model, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, min_per_choice=6, min_wrong=3, force_ge_half=False, eps=1e-8, selected_trials = None):
+#min_per_choice=6, min_wrong=3
+
+    print("min_per_choice, min_wrong", min_per_choice, min_wrong)
+    # features: (T, N) or (1,T,N) etc -> make (T, N)
+    X = features.squeeze()
+    if isinstance(X, torch.Tensor):
+        X_np = X.float().detach().cpu().numpy()
+    else:
+        X_np = np.asarray(X)
+
+    y = np.asarray(y.squeeze())
+    n_stim = 2
+
+    # logits + choice
+    out = model(torch.tensor(X).float())
+    
+    if isinstance(out, torch.Tensor):
+        out = out.detach().cpu().numpy()
+    out = np.asarray(out).ravel()
+
+    threshold = 0.0   #if crit == "MSE" else 0.0
+    choice = (out >= threshold).astype(int)
+
+    if crit != "BCE":
+        choice = 2*choice - 1
+
+    if choose_y != "model":
+        choice = animal_choice
+
+    print("choice", choice)
+        
+    neurons_tuned_stim1, neurons_tuned_stim0, neurons_untuned = tunings
+    neurons_tuned_list = list(neurons_tuned_stim1) + list(neurons_tuned_stim0)
+
+    # sample up to 1000 neurons
+    #rng = np.random.default_rng(0)
+    #if len(neurons_tuned_list) > n_neurons:
+    #    neurons_tuned_list = list(rng.choice(neurons_tuned_list, size=n_neurons, replace=False))
+
+    # allocate by LOOP INDEX (safe)
+    CP_arr = np.full((len(neurons_tuned_list), n_stim), np.nan)
+    new_tunings = []
+
+    list_of_stim = [0, 1] if crit == "BCE" else [-1, 1]
+    
+    for i, n in enumerate(neurons_tuned_list):
+
+        pref = (0 if crit == "BCE" else -1) if n in neurons_tuned_stim0 else (1)            
+        new_tunings.append(pref)
+
+        for s in list_of_stim:
+            
+            print("n, s", n, s)
+            idx = np.where(y == s)[0]
+            print("idx", idx)
+            
+            if idx.size == 0:
+                continue
+
+            r_raw = X_np[idx, n]                  # raw firing rates this condition
+ 
+            # FIX 4: z-score within condition to remove mean stimulus drive
+            mu, sd = r_raw.mean(), r_raw.std()
+            r = (r_raw - mu) / (sd + eps) if sd > eps else r_raw - mu
+            #r = r_raw
+            
+            o = (choice[idx] == pref).astype(int)  # labels: 1 = preferred choice
+                
+            n1 = int(o.sum())
+            n0 = int((1 - o).sum())
+            print("choice is preferred, or unpreferred", n0, n1)
+            wrong = np.sum(choice[idx] != y[idx])
+            print("wrong", wrong)
+            #wrong = min(n0, n1)  # proxy if you don't have correctness labels
+
+            if n1 < min_per_choice or n0 < min_per_choice or wrong < min_wrong:
+                print("OH nooo, the classifier i just too good and doesn't make mistakes")
+                continue
+
+            if selected_trials!=None:
+                ind_selected_trials = list(set(idx) & set(selected_trials))
+            
+            print("o", "r", o, r)
+            auc = roc_auc_score(o, r)  # <-- correct order
+            print("auc", auc, 1-auc)
+            if force_ge_half:
+                auc = max(auc, 1 - auc)
+
+            s_idx = 0 if s in (-1, 0) else 1
+            CP_arr[i, s_idx] = auc
+
+    cp = np.nanmean(CP_arr, axis=1)  # mean across stim, per sampled neuron
+    return cp, CP_arr, neurons_tuned_list, new_tunings
+
+def compute_readout_weights_nonlinear_model(model, features, y, tunings, crit, n_neurons, choose_y = "model", animal_choice = None, eps=1e-7, normalize = False, selected_trials = None):
+
+    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp_nonlinear_model(model, features, y, tunings, crit, n_neurons, choose_y, animal_choice, selected_trials = selected_trials)
+    C, Z, valid = compute_noise_corr(features, y, neurons_tuned_list)    
+    
+    C = np.asarray(C, dtype=float)
+    cp = np.asarray(cp, dtype=float).ravel()[valid]
+    
+    # NaN/inf safety net before solve
+    assert np.all(np.isfinite(C)), "C still has NaN/inf"
+    if not np.all(np.isfinite(cp)):
+        return "NaN"
+    
+    diag = np.clip(np.diag(C), eps, None)
+    rhs = (np.pi * np.sqrt(diag) * (cp - 0.5)) / np.sqrt(2)
+    
+    # Solve C beta = v  (preferred over inv(C) @ v)
+    try:
+        beta = solve(C, rhs, assume_a="sym")
+    except np.linalg.LinAlgError:
+        beta, *_ = np.linalg.lstsq(C, rhs, rcond=None)
+    
+    if normalize:
+        denom = np.sqrt(beta.T @ C @ beta) + eps
+        beta = beta / denom
+
+    return beta
+
+def find_bias_nonlinear_model(p, model, features, y, crit="BCE", comparison="heuristic"):
+        print("p", p)
+        mean = features.clone().mean(0).numpy()
+        features_sparse = features.squeeze().numpy().copy() #- mean
+        m, n = features_sparse.shape
+        
+        for i in range(m):
+            rand_zeros = np.random.choice(n, size=int(p*n), replace=False)
+            features_sparse[i,rand_zeros] = 0
+            #print(list(set(rand_zeros) & set(neurons_circ_new)), student_w[list(set(rand_zeros) & set(neurons_circ_new))], features[i,list(set(rand_zeros) & set(neurons_circ_new))], student_w[list(set(rand_zeros) & set(neurons_circ_new))].dot(features[i,list(set(rand_zeros) & set(neurons_circ_new))]))
+
+        #features_sparse = features_sparse - mean #features_sparse.mean(0)
+    
+        logits = model(torch.tensor(features_sparse).float())
+        logits_nonsparse = model(features.float())
+    
+        y = y.squeeze(); logits = logits.squeeze(); logits_nonsparse = logits_nonsparse.squeeze();
+        
+        if comparison == "heuristic":
+            ind0 = np.where(y == 0)[0] 
+            ind1 = np.where(y == 1)[0]
+        else:
+            ind0 = np.where(y == -1)[0] 
+            ind1 = np.where(y == 1)[0] 
+
+        if crit == "BCE":
+            ind0 = np.where(y == 0)[0] 
+            ind1 = np.where(y == 1)[0] 
+
+        y_res = logits.detach().numpy() - model[4].bias.item()
+
+        print("criteria is: ", crit)
+        if crit == "BCE":
+            threshold = 0.0
+            acc = ( (y[logits < threshold] == 0).sum() + (y[logits > threshold] == 1).sum() )/len(y)
+        elif crit == "MSE":
+            threshold = 0.0
+            acc = ( (y[logits < threshold] == -1).sum() + (y[logits > threshold] == 1).sum() )/len(y)
+
+        return acc, (logits<threshold).sum()/features.shape[0]
+
 def compute_other_cp_inactivation(writer, X_train, y_train, tunings, model):
 
     neurons_circ_new, neurons_rad_new, neurons_untuned_new = tunings

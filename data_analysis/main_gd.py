@@ -19,8 +19,9 @@ import torch.optim as optim
 
 from create_data import run
 from train_Oja import compute_svd, train_oja_unsupervised
-from utils import compute_cp, compute_readout_weights, find_bias_simple, compute_other_cp_inactivation, save_all
+from utils import compute_cp, compute_readout_weights, find_bias_simple, compute_other_cp_inactivation, save_all, compute_cp_nonlinear_model, compute_readout_weights_nonlinear_model, find_bias_nonlinear_model
 from plot import plot_weights, plot_cp_rw, plot_choice_imbalance, plot_results
+from train_gd import train_nonlinear_model
 
 from datetime import datetime
 from pathlib import Path
@@ -73,6 +74,11 @@ def train_linear_model(
     W = torch.full((d, 1), 1.0, requires_grad=True)  #torch.ones(d, 1, requires_grad=True) #torch.randn(d, 1, requires_grad=True)
     b = torch.zeros(1, requires_grad=True)
 
+    W1 = torch.full((d, d), 1.0, requires_grad=True)  #torch.ones(d, 1, requires_grad=True) #torch.randn(d, 1, requires_grad=True)
+    b1 = torch.zeros(d, requires_grad=True)
+    W2 = torch.full((d, int(d//2)), 1.0, requires_grad=True)  #torch.ones(d, 1, requires_grad=True) #torch.randn(d, 1, requires_grad=True)
+    b2 = torch.zeros(int(d//2), requires_grad=True)
+
     # Optimizer (this replaces manual updates)
     optimizer = torch.optim.SGD([W, b], lr=lr)
 
@@ -101,16 +107,21 @@ def train_linear_model(
             print(f"Epoch {epoch}: loss = {loss.item():.4f}")
 
     return W.detach(), b.detach()
-
-
+    
 #X_train = X_train.detach().numpy()
 #y_train = y_train.detach().numpy()
 
-w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-4, n_epochs=10000, loss_type="mse",  # "mse" or "bce"
-    verbose=True)
+if model_type == "linear":
+    w_gd, b_gd = train_linear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-4, n_epochs=10000, loss_type="mse", verbose=True)
+     # "mse" or "bce" 
+    print(w_gd.T.shape, X_train.T.shape, b_gd.shape)
+    y = w_gd.T @ X_train.T + b_gd
+else:
+    model = train_nonlinear_model(torch.tensor(X_train).float(), torch.tensor(y_train), lr=1e-3, n_epochs=1000, loss_type="mse", verbose=True)
+    w_gd = model[4].weight; b_gd = model[4].bias
+    y = model(torch.tensor(X_train).float())
 
 w_gd = torch.tensor(w_gd); b_gd = torch.tensor(b_gd); 
-y = torch.tensor(X_train).float() @ w_gd + b_gd
 y = 2*(y.squeeze()>0.0).numpy().astype(float) - 1 #(y.squeeze()>0.0).numpy().astype(float)
 
 ind0 = np.where(y_train == -1)[0] #np.where(y_train == 0)[0]
@@ -119,7 +130,10 @@ ind1 = np.where(y_train == 1)[0]
 print("loss (training): ", np.abs(torch.tensor(y).squeeze()-y_train.squeeze()).sum()/len(y_train))
 print("acc (training): ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / len(y))
 
-y = torch.tensor(X_test).float() @ w_gd + b_gd
+if model_type == "linear":
+    y = w_gd.T @ torch.tensor(X_test).float().T + b_gd
+else:
+    y = model(torch.tensor(X_test).float())
 y = 2*(y.squeeze()>0.0).numpy().astype(float) - 1 #(y.squeeze()>0.0).numpy().astype(float)
 
 ind0 = np.where(y_test == -1)[0] #np.where(y_train == 0)[0]
@@ -131,51 +145,60 @@ print("acc (testing): ", float( (y[ind0] <= 0).sum() + (y[ind1] >= 0).sum() ) / 
 neurons_circ_new, neurons_rad_new, neurons_untuned_new = tunings
 neurons_circ_new = list(neurons_circ_new); neurons_rad_new = list(neurons_rad_new); neurons_untuned_new = list(neurons_untuned_new);
 
-fig = plt.figure()
-if neurons_circ_new != []:
-    plt.plot(w_gd.squeeze()[np.array(neurons_circ_new)], "*-")
-if neurons_rad_new != []:
-    plt.plot(w_gd.squeeze()[np.array(neurons_rad_new)], "*-")
-plt.ylabel("Weights", fontsize=16)
-plt.xlabel("weight index", fontsize=16)
-
-print(w_gd.squeeze()[np.array(neurons_circ_new)].mean().item(), w_gd.squeeze()[np.array(neurons_rad_new)].mean().item())
-
 writer = SummaryWriter("runs/my_GD_experiment_" + directory + "_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + ["_centering" if centering else ""][0])
 
-if neurons_circ_new != []:
+if model_type == "linear":
     fig = plt.figure()
-    plt.plot(w_gd.squeeze()[np.array(neurons_circ_new)])
-    #plt.plot(student_w.squeeze()[np.array(neurons_circ_new)], "*-")
-    plt.plot(-Vh[0,np.array(neurons_circ_new)], "*-")
-    plt.legend(["w gd (circular)", "pc1 (circular)"])
-    writer.add_figure("plots/w_gd_circ", fig, global_step=0)
+    if neurons_circ_new != []:
+        plt.plot(w_gd.squeeze()[np.array(neurons_circ_new)], "*-")
+    if neurons_rad_new != []:
+        plt.plot(w_gd.squeeze()[np.array(neurons_rad_new)], "*-")
+    plt.ylabel("Weights", fontsize=16)
+    plt.xlabel("weight index", fontsize=16)
 
-if neurons_rad_new != []:
-    fig = plt.figure()
-    plt.plot(w_gd.squeeze()[np.array(neurons_rad_new)])
-    #plt.plot(student_w[np.array(neurons_rad_new)], "*-")
-    plt.plot(-Vh[0,np.array(neurons_rad_new)], "*-")
-    plt.legend(["w gd (circular)", "pc1 (circular)"])
-    writer.add_figure("plots/w_gd_rad", fig, global_step=0)
+    print(w_gd.squeeze()[np.array(neurons_circ_new)].mean().item(), w_gd.squeeze()[np.array(neurons_rad_new)].mean().item())
+
+    if neurons_circ_new != []:
+        fig = plt.figure()
+        plt.plot(w_gd.squeeze()[np.array(neurons_circ_new)])
+        #plt.plot(student_w.squeeze()[np.array(neurons_circ_new)], "*-")
+        plt.plot(-Vh[0,np.array(neurons_circ_new)], "*-")
+        plt.legend(["w gd (circular)", "pc1 (circular)"])
+        writer.add_figure("plots/w_gd_circ", fig, global_step=0)
+
+    if neurons_rad_new != []:
+        fig = plt.figure()
+        plt.plot(w_gd.squeeze()[np.array(neurons_rad_new)])
+        #plt.plot(student_w[np.array(neurons_rad_new)], "*-")
+        plt.plot(-Vh[0,np.array(neurons_rad_new)], "*-")
+        plt.legend(["w gd (circular)", "pc1 (circular)"])
+        writer.add_figure("plots/w_gd_rad", fig, global_step=0)
 
 crit = "MSE"
 n_neurons = X_train.shape[1]
 #tunings = [np.array(neuron_id_tuned_circular)-1, np.array(neuron_id_tuned_radial)-1, np.array(neuron_id_tuned_untuned)-1]
 tunings = [np.array(neurons_circ_new), np.array(neurons_rad_new), np.array(neurons_untuned_new)]
 
-cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
-readout_weights = compute_readout_weights(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
+if model_type == "linear":
+    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
+    readout_weights = compute_readout_weights(w_gd.T, b_gd, X_total, y_total, tunings, crit, n_neurons)
+else:
+    cp, CP_arr, neurons_tuned_list, new_tunings = compute_cp_nonlinear_model(model, X_total, y_total, tunings, crit, n_neurons)
+    readout_weights = compute_readout_weights_nonlinear_model(model, X_total, y_total, tunings, crit, n_neurons)
 
-fig = plt.figure()
-plt.bar(["stim 1 (over-represented)", "stim 2 (under-represented)"], [np.nanmean(readout_weights[:len(tunings[0])]), np.nanmean(readout_weights[len(tunings[0]):])])
-writer.add_figure("plots/readout_weights_GD", fig, global_step=0)
+if not isinstance(readout_weights, str):
+    fig = plt.figure()
+    plt.bar(["stim 1 (over-represented)", "stim 2 (under-represented)"], [np.nanmean(readout_weights[:len(tunings[0])]), np.nanmean(readout_weights[len(tunings[0]):])])
+    writer.add_figure("plots/readout_weights_GD", fig, global_step=0)
 
 class_imbalance = []
 p_inactivation = [.00001, 0.1, 0.3, 0.5, 0.75, 0.9]
 crit = "MSE"
 for p in p_inactivation:
-    acc, ci = find_bias_simple(p, torch.tensor(w_gd).float(), torch.tensor(b_gd).float(), torch.tensor(X_total).float(), torch.tensor(y_total).float(), crit, comparison="gd")
+    if model_type == "linear":
+        acc, ci = find_bias_simple(p, torch.tensor(w_gd).float(), torch.tensor(b_gd).float(), torch.tensor(X_total).float(), torch.tensor(y_total).float(), crit, comparison="gd")
+    else:
+         acc, ci = find_bias_nonlinear_model(p, model, torch.tensor(X_total).float(), torch.tensor(y_total).float(), crit, comparison="gd")       
     class_imbalance.append(ci)
 
 fig = plt.figure()
@@ -184,11 +207,10 @@ plt.xlabel("probability of inactivation")
 plt.ylabel("class imbalance (under-represented)")
 writer.add_figure("plots/class_imbalance_GD", fig, global_step=0)
 
-file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + "_session" + str(session) + ["_centering" if centering else ""][0]
+file = directory[:-1] + "_GD_seed_" + str(seed) + "_snr_choice_" + str(snr_choice) + "_choice_" + choice + "_session" + str(session) + ["_centering" if centering else ""][0] + ["_nonlinear" if model_type=="nonlinear" else ""][0]
 
 date_str = datetime.now().strftime("%Y-%m-%d")
 Path("/home/dvoina/myproj1/data_analysis/results/" + date_str).mkdir(parents=True, exist_ok=True)
-
 
 print('results/' + date_str + "/" + file + "_cp.npy")
 np.save('results/' + date_str + "/"  + file + "_cp.npy", np.array(cp))
@@ -198,3 +220,6 @@ np.save('results/' + date_str + "/"  + file + "_class_imbalance.npy", np.array(c
 np.save('results/' + date_str + "/"  + file + 'w_gd.npy', np.array(w_gd))
 np.save('results/' + date_str + "/"  + file + 'b_gd.npy', np.array(b_gd))
 
+np.save("results/" + date_str + "/" + file + "_neurons_tuned_circ.npy", np.array(tunings[0]))
+np.save("results/" + date_str + "/" + file  + "_neurons_tuned_rad.npy", np.array(tunings[1]))
+np.save("results/" + date_str + "/" + file  + "_neurons_tuned_untuned.npy", np.array(tunings[2]))
